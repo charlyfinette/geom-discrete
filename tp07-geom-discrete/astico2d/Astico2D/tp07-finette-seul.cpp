@@ -37,7 +37,7 @@ class ES
     public:
 	std::list<Point> m_liste;
 	std::string m_nom;
-    ES();
+    ES() {};
     ES(ES_NOM nom)
     {
         if(nom == CARRE)
@@ -74,56 +74,111 @@ class ES
 
 // Placez ici vos fonctions de transformations à la place de ces exemples
 
-
-void  erosion(cv::Mat &img_niv, ES &es)
+void  une_erosion(cv::Mat &img_niv, ES &es)
 {
     CHECK_MAT_TYPE(img_niv, CV_32SC1);
+
+    cv::Mat img_cp = img_niv.clone();
 
     for (int y = 0; y < img_niv.rows; y++)
     for (int x = 0; x < img_niv.cols; x++)
     {
-	    if(img_niv.at<int>(y,x) != 0)// attention
-	    {
-		for( auto const& point  : es.m_liste)
+	img_niv.at<int>(y,x) = 0;
+	bool is_in_new_shape = true;
+
+	for( const auto & neigh : es.m_liste )
+	{
+		if(y + neigh.m_y < 0
+		|| y + neigh.m_y > img_niv.rows - 1
+		|| x + neigh.m_x < 0
+		|| x + neigh.m_x > img_niv.cols - 1)
+			is_in_new_shape = false;
+		else
+        		is_in_new_shape *= (img_cp.at<int>(y + neigh.m_y, x + neigh.m_x) != 0 );
+	}
+
+	if(is_in_new_shape)
+	 	img_niv.at<int>(y,x) = 255;
+    }
+}
+
+void  erosion(cv::Mat &img_niv, ES &es, int nbr_repetitions)
+{
+	for( int i = 0; i < nbr_repetitions; i++)
+	{
+		une_erosion(img_niv, es);	
+	}	
+}
+
+void une_dilatation(cv::Mat &img_niv, ES es)
+{
+    CHECK_MAT_TYPE(img_niv, CV_32SC1);
+
+    cv::Mat img_cp = img_niv.clone();
+
+    for (int y = 0; y < img_niv.rows; y++)
+    for (int x = 0; x < img_niv.cols; x++)
+    {
+	img_niv.at<int>(y,x) = 0;
+	bool is_in_new_shape = false;
+
+	for( const auto & neigh : es.m_liste )
+	{
+		if(!(y + neigh.m_y < 0
+		|| y + neigh.m_y > img_niv.rows - 1
+		|| x + neigh.m_x < 0
+		|| x + neigh.m_x > img_niv.cols - 1))
 		{
-			std::cout << point.m_x << std::endl;
-			std::cout << point.m_y << std::endl;	
+			if( img_cp.at<int>(y + neigh.m_y, x + neigh.m_x) != 0)
+			{
+				is_in_new_shape = true;
+				break;
+			}
 		}
-	    }
+	}
+
+	if(is_in_new_shape)
+	 	img_niv.at<int>(y,x) = 255;
     }
 }
 
-
-void transformer_bandes_verticales (cv::Mat &img_niv)
+void  dilatation(cv::Mat &img_niv, ES &es, int nbr_repetitions)
 {
-    CHECK_MAT_TYPE(img_niv, CV_32SC1);
-
-    for (int y = 0; y < img_niv.rows; y++)
-    for (int x = 0; x < img_niv.cols; x++)
-    {
-        int g = img_niv.at<int>(y,x);
-        if (g > 0) {
-            img_niv.at<int>(y,x) = x;
-        }
-    }
+	for( int i = 0; i < nbr_repetitions; i++)
+	{
+		une_dilatation(img_niv, es);	
+	}	
 }
 
-
-void transformer_bandes_diagonales (cv::Mat &img_niv)
+void ouverture(cv::Mat &img_niv, ES es)
 {
-    CHECK_MAT_TYPE(img_niv, CV_32SC1);
-
-    for (int y = 0; y < img_niv.rows; y++)
-    for (int x = 0; x < img_niv.cols; x++)
-    {
-        int g = img_niv.at<int>(y,x);
-        if (g > 0) {
-            img_niv.at<int>(y,x) = x+y;
-        }
-    }
+	une_erosion(img_niv, es);
+	une_dilatation(img_niv, es);
 }
 
+void fermeture(cv::Mat &img_niv, ES es)
+{
+	une_dilatation(img_niv, es);
+	une_erosion(img_niv, es);
+}
 
+void debruiter(cv::Mat &img_niv, ES &es)
+{
+	ouverture(img_niv, es);
+	fermeture(img_niv, es);
+}
+
+void ouverture_puis_fermeture(cv::Mat &img_niv, ES &es)
+{
+	ouverture(img_niv, es);
+	fermeture(img_niv, es);
+}
+
+void fermeture_puis_ouverture(cv::Mat &img_niv, ES &es)
+{
+	fermeture(img_niv, es);
+	ouverture(img_niv, es);
+}
 //----------------------------- I N T E R F A C E -----------------------------
 
 
@@ -133,15 +188,17 @@ class MonApp : public Astico2D {
     // Déclarez ici d'autres membres éventuels
     ES es;
     ES_NOM es_nom;
+    int repetitions;
 
     MonApp (int argc, char **argv) : 
         Astico2D (argc, argv) 
         // initialisez ici vos classes membre éventuelles
     {
-//	    es_nom = CARRE;
-//	    es = ES(es_nom);
+	    repetitions = 1;
+	    es_nom = CARRE;
+	    es = ES(es_nom);
         if (!init_ok) return;  // erreur dans l'initialisation
-
+	creer_slider ("Répétitions", &repetitions, 50);
         // Autres actions du constructeur
     }
 
@@ -154,8 +211,12 @@ class MonApp : public Astico2D {
         // Indiquez ici les touches du clavier et vos transformations
         std::cout <<
             "  1     erosion\n"
-            "  2     dessine des bandes verticales\n"
-            "  3     dessine des bandes diagonales\n"
+            "  2     dilatation\n"
+            "  3     ouverture\n"
+	    "  4     fermeture\n"
+	    "  5     debruitage\n"
+	    "  6     ouverture puis fermeture\n"
+	    "  5     fermeture puis ouverture\n"
 	    "  n     change l'élément structurant\n"
         << std::endl;
     }
@@ -171,7 +232,10 @@ class MonApp : public Astico2D {
             case '1' :
             case '2' :
             case '3' :
-	    case 'n' :
+	    case '4' :
+	    case '5' :
+	    case '6' :
+	    case '7' :
                 // On mémorise la touche pressée
                 touche_transfo = key;
                 // On précise le mode : M_NIVEAUX ou M_COULEURS
@@ -207,15 +271,31 @@ class MonApp : public Astico2D {
         
         switch (touche_transfo) {
             case '1' :
-                erosion(img_niv, es);
+                erosion(img_niv, es, repetitions);
                 representer_en_couleurs_vga (img_niv, img_coul);
                 break;
             case '2' :
-                transformer_bandes_verticales (img_niv);
+                dilatation(img_niv, es, repetitions);
                 representer_en_couleurs_vga (img_niv, img_coul);
                 break;
             case '3' :
-                transformer_bandes_diagonales (img_niv);
+                ouverture(img_niv, es);
+                representer_en_couleurs_vga (img_niv, img_coul);
+                break;
+            case '4' :
+                fermeture(img_niv, es);
+                representer_en_couleurs_vga (img_niv, img_coul);
+                break;
+	    case '5' :
+                debruiter(img_niv, es);
+                representer_en_couleurs_vga (img_niv, img_coul);
+                break;
+	    case '6' :
+                ouverture_puis_fermeture(img_niv, es);
+                representer_en_couleurs_vga (img_niv, img_coul);
+                break;
+	    case '7' :
+                fermeture_puis_ouverture(img_niv, es);
                 representer_en_couleurs_vga (img_niv, img_coul);
                 break;
         }
